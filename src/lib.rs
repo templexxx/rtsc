@@ -27,6 +27,16 @@ type GetUnixNano = fn() -> i64;
 
 pub static mut UNIX_NANO: GetUnixNano = unix_nano_std;
 
+#[cfg(not(feature = "invariant_tsc"))]
+pub fn unix_nano() -> i64 {
+    return unix_nano_std();
+}
+
+#[cfg(feature = "invariant_tsc")]
+pub fn unix_nano() -> i64 {
+    return unix_nano_tsc();
+}
+
 const NANOS_PER_SEC: i64 = 1_000_000_000;
 
 pub fn unix_nano_std() -> i64 {
