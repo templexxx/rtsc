@@ -44,7 +44,7 @@ static mut TSC_ENABLED: bool = false;
 /// `reset` resets UNIX_NANO implementation.
 /// Not thread-safe.
 pub unsafe fn reset() {
-    if is_enabled() {
+    if TSC_ENABLED || is_enabled() {
         UNIX_NANO = unix_nano_tsc;
         TSC_ENABLED = true;
     }
@@ -57,11 +57,18 @@ pub unsafe fn is_enabled() -> bool {
 #[repr(align(128))]
 union OffsetCoeff {
     arr: [i8; 128],
-}
+}   // 128bytes for X86 false sharing range.
 
 static OFFSET_COEFF: OffsetCoeff = OffsetCoeff { arr: [0; 128] };
+static OFFSET_COEFF_ADDR: *OffsetCoeff = &OFFSET_COEFF;
 
+#![feature(asm)];
 pub fn unix_nano_tsc() -> i64 {
+    unsafe {
+        asm!(
+
+        )
+    }
     return 0;
 }
 
