@@ -1,31 +1,45 @@
-use std::time::{SystemTime, UNIX_EPOCH};
 use core::arch::x86_64::{CpuidResult, __cpuid};
-use std::ptr::null;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 #[cfg(test)]
 mod tests {
-    use crate::{unix_nano, unix_nano_tsc};
-
+    // use crate::{enable_tsc, get_system_clock_source, has_invariant_tsc, UNIX_NANO, unix_nano_tsc};
+    use crate::{
+        get_system_clock_source, reset, unix_nano_std, unix_nano_tsc, GetUnixNano, UNIX_NANO,
+    };
     #[test]
-    fn it_works() {
-        let result = 2 + 2;
-        assert_eq!(result, 4);
+    unsafe fn it_works() {
+        let mut unix_nano: GetUnixNano = unix_nano_tsc;
+        unix_nano = unix_nano_std;
         let a = unix_nano();
-        let unix_nano = unix_nano_tsc;
+        println!("{} {}", unix_nano(), a);
+        let a = unix_nano();
         let b = unix_nano();
-        println!("{} {} {}",b-a, a, b);
+        println!("{}", unix_nano());
+
+        println!("{}", UNIX_NANO());
+        reset();
+        println!("{}", UNIX_NANO());
     }
 }
 
+type GetUnixNano = fn() -> i64;
+
+pub static mut UNIX_NANO: GetUnixNano = unix_nano_std;
+
 const NANOS_PER_SEC: i64 = 1_000_000_000;
 
-pub fn unix_nano() ->i64 {
+pub fn unix_nano_std() -> i64 {
     let dur = SystemTime::now().duration_since(UNIX_EPOCH).unwrap();
-    return  dur.as_secs() as i64 * NANOS_PER_SEC + dur.subsec_nanos() as i64
+    return dur.as_secs() as i64 * NANOS_PER_SEC + dur.subsec_nanos() as i64;
 }
 
 pub fn reset() {
-
+    if enable_tsc() {
+        unsafe {
+            UNIX_NANO = unix_nano_tsc;
+        }
+    }
 }
 
 pub fn unix_nano_tsc() -> i64 {
@@ -34,39 +48,42 @@ pub fn unix_nano_tsc() -> i64 {
 
 #[cfg(not(target_arch = "x86_64"))]
 fn enable_tsc() -> bool {
-    return false
+    return false;
 }
 
 #[cfg(target_arch = "x86_64")]
 fn enable_tsc() -> bool {
-    if !has_invariant_tsc() || (get_system_clock_source() != "tsc") {
-        return false
+    return if !has_invariant_tsc() && (get_system_clock_source() != "tsc") {
+        false
     } else {
-
-        return is_x86_feature_detected!("avx") && is_x86_feature_detected!("fma")
-    }
+        is_x86_feature_detected!("avx") && is_x86_feature_detected!("fma")
+    };
 }
 
 #[cfg(not(target_os = "linux"))]
 fn get_system_clock_source() -> String {
-    return ""
+    return String::new();
 }
 
-#[cfg(target_os = "linux")]
+const CLOCK_SRC_PATH: &str = "/sys/devices/system/clocksource/clocksource0/current_clocksource";
+
+#[cfg(all(target_os = "linux"))]
 fn get_system_clock_source() -> String {
     use std::fs;
-    let t = fs::read_to_string("/sys/devices/system/clocksource/clocksource0/current_clocksource");
-   let src =  match t {
-       Ok(text) => text,
-       Err(_) => String::new(),
-   };
+    let t = fs::read_to_string(CLOCK_SRC_PATH);
+    let src = match t {
+        Ok(text) => text,
+        Err(_) => String::new(),
+    };
 
-    if src.is_empty(){
-        let mut s = src;
-        s.pop();
-        return s;
+    if !src.is_empty() {
+        if src.ends_with('\n') {
+            let mut s = src;
+            s.pop();
+            return s;
+        }
     }
-   return String::new();
+    return String::new();
 }
 
 // This function was copied from https://github.com/gnzlbg/tsc/blob/master/src/lib.rs,
@@ -74,7 +91,10 @@ fn get_system_clock_source() -> String {
 #[cfg(all(target_arch = "x86_64"))]
 fn has_invariant_tsc() -> bool {
     // Obtain the largest basic CPUID leaf supported by the CPUID
-    let CpuidResult { eax: max_basic_leaf, .. } = unsafe { __cpuid(0_u32) };
+    let CpuidResult {
+        eax: max_basic_leaf,
+        ..
+    } = unsafe { __cpuid(0_u32) };
 
     // Earlier Intel 486 => too old to have an invariant TSC.
     if max_basic_leaf < 1 {
@@ -82,8 +102,10 @@ fn has_invariant_tsc() -> bool {
     }
 
     // Obtain the largest extended CPUID leaf supported by the CPUID
-    let CpuidResult { eax: max_extended_leaf, .. } =
-        unsafe { __cpuid(0x8000_0000_u32) };
+    let CpuidResult {
+        eax: max_extended_leaf,
+        ..
+    } = unsafe { __cpuid(0x8000_0000_u32) };
 
     // CPU doesn't have "Advanced Power Management Information" => too old to
     // have an invariant TSC.
@@ -95,5 +117,5 @@ fn has_invariant_tsc() -> bool {
 
     // Test CPUID.80000007H:EDX[8], if the bit is set, the CPU has an
     // invariant TSC
-   return  edx & (1 << 8) != 0
+    return edx & (1 << 8) != 0;
 }
