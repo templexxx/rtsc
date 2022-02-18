@@ -1,25 +1,20 @@
 use core::arch::x86_64::{CpuidResult, __cpuid};
+use std::mem::transmute;
+use std::sync::atomic::{AtomicBool, Ordering::Relaxed};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 #[cfg(test)]
 mod tests {
+    use std::mem;
     // use crate::{enable_tsc, get_system_clock_source, has_invariant_tsc, UNIX_NANO, unix_nano_tsc};
     use crate::{
-        get_system_clock_source, reset, unix_nano_std, unix_nano_tsc, GetUnixNano, UNIX_NANO,
+        get_system_clock_source, is_enabled, reset, unix_nano_std, unix_nano_tsc, GetUnixNano,
+        OffsetCoeff, OFFSET_COEFF, UNIX_NANO,
     };
     #[test]
-    unsafe fn it_works() {
-        let mut unix_nano: GetUnixNano = unix_nano_tsc;
-        unix_nano = unix_nano_std;
-        let a = unix_nano();
-        println!("{} {}", unix_nano(), a);
-        let a = unix_nano();
-        let b = unix_nano();
-        println!("{}", unix_nano());
-
-        println!("{}", UNIX_NANO());
-        reset();
-        println!("{}", UNIX_NANO());
+    fn it_works() {
+        println!("{}", mem::align_of::<OffsetCoeff>());
+        println!("{}", mem::size_of::<OffsetCoeff>());
     }
 }
 
@@ -44,13 +39,27 @@ pub fn unix_nano_std() -> i64 {
     return dur.as_secs() as i64 * NANOS_PER_SEC + dur.subsec_nanos() as i64;
 }
 
-pub fn reset() {
-    if enable_tsc() {
-        unsafe {
-            UNIX_NANO = unix_nano_tsc;
-        }
+static mut TSC_ENABLED: bool = false;
+
+/// `reset` resets UNIX_NANO implementation.
+/// Not thread-safe.
+pub unsafe fn reset() {
+    if is_enabled() {
+        UNIX_NANO = unix_nano_tsc;
+        TSC_ENABLED = true;
     }
 }
+
+pub unsafe fn is_enabled() -> bool {
+    return TSC_ENABLED;
+}
+
+#[repr(align(128))]
+union OffsetCoeff {
+    arr: [i8; 128],
+}
+
+static OFFSET_COEFF: OffsetCoeff = OffsetCoeff { arr: [0; 128] };
 
 pub fn unix_nano_tsc() -> i64 {
     return 0;
