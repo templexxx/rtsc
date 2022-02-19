@@ -1,4 +1,6 @@
 use core::arch::x86_64::{CpuidResult, __cpuid};
+use std::arch::asm;
+use std::arch::x86_64::_rdtsc;
 use std::mem::transmute;
 use std::sync::atomic::{AtomicBool, Ordering::Relaxed};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -6,11 +8,13 @@ use std::time::{SystemTime, UNIX_EPOCH};
 #[cfg(test)]
 mod tests {
     use std::mem;
+
     // use crate::{enable_tsc, get_system_clock_source, has_invariant_tsc, UNIX_NANO, unix_nano_tsc};
     use crate::{
         get_system_clock_source, is_enabled, reset, unix_nano_std, unix_nano_tsc, GetUnixNano,
         OffsetCoeff, OFFSET_COEFF, UNIX_NANO,
     };
+
     #[test]
     fn it_works() {
         println!("{}", mem::align_of::<OffsetCoeff>());
@@ -21,15 +25,12 @@ mod tests {
 type GetUnixNano = fn() -> i64;
 
 pub static mut UNIX_NANO: GetUnixNano = unix_nano_std;
+static mut TSC_ENABLED: bool = false;
 
-#[cfg(not(feature = "invariant_tsc"))]
 pub fn unix_nano() -> i64 {
-    return unix_nano_std();
-}
-
-#[cfg(feature = "invariant_tsc")]
-pub fn unix_nano() -> i64 {
-    return unix_nano_tsc();
+    unsafe {
+        return UNIX_NANO();
+    }
 }
 
 const NANOS_PER_SEC: i64 = 1_000_000_000;
@@ -39,37 +40,105 @@ pub fn unix_nano_std() -> i64 {
     return dur.as_secs() as i64 * NANOS_PER_SEC + dur.subsec_nanos() as i64;
 }
 
-static mut TSC_ENABLED: bool = false;
-
-/// `reset` resets UNIX_NANO implementation.
+/// `init` init UNIX_NANO implementation. Invoke it before using.
 /// Not thread-safe.
-pub unsafe fn reset() {
-    if TSC_ENABLED || is_enabled() {
-        UNIX_NANO = unix_nano_tsc;
-        TSC_ENABLED = true;
+pub fn init() {
+    unsafe {
+        if !TSC_ENABLED {
+            if enable_tsc() {
+                UNIX_NANO = unix_nano_tsc;
+                TSC_ENABLED = true;
+            }
+        }
     }
 }
 
-pub unsafe fn is_enabled() -> bool {
-    return TSC_ENABLED;
+pub fn is_enabled() -> bool {
+    unsafe {
+        return TSC_ENABLED;
+    }
 }
 
 #[repr(align(128))]
 union OffsetCoeff {
     arr: [i8; 128],
-}   // 128bytes for X86 false sharing range.
+} // 128bytes for X86 false sharing range.
 
-static OFFSET_COEFF: OffsetCoeff = OffsetCoeff { arr: [0; 128] };
-static OFFSET_COEFF_ADDR: *OffsetCoeff = &OFFSET_COEFF;
+static mut OFFSET_COEFF: OffsetCoeff = OffsetCoeff { arr: [1; 128] };
 
-#![feature(asm)];
+pub unsafe fn calibrate() {
+    if !TSC_ENABLED {
+        return;
+    }
+}
+
+#[cfg(not(target_arch = "x86_64"))]
 pub fn unix_nano_tsc() -> i64 {
+    return 0 as i64;
+}
+
+#[cfg(target_arch = "x86_64")]
+pub fn unix_nano_tsc() -> i64 {
+    let ret;
     unsafe {
         asm!(
-
-        )
+        "rdtsc",
+        "sal rdx, $32",
+        "or  rax, rdx",
+        "vcvtsi2sd xmm0, xmm0, rax",     // ftsc = float64(tsc)
+        "vmovdqa xmm3, [{0}]",  // get coeff
+        "vmovhlps xmm4, xmm3, xmm3",    // get offset
+        "vfmadd132pd xmm3, xmm4, xmm0",  // X0 * X3 + X4 -> X3: ftsc * coeff + offset
+        "vcvttsd2si {1}, xmm3",
+        in(reg) &OFFSET_COEFF,
+        out(reg) ret,
+        options(nostack)
+        );
     }
-    return 0;
+    return ret;
+}
+
+#[cfg(not(target_arch = "x86_64"))]
+pub fn store_offset_coeff(offset: f64, coeff: f64) {}
+
+#[cfg(target_arch = "x86_64")]
+pub fn store_offset_coeff(offset: f64, coeff: f64) {
+    unsafe {
+        asm!(
+        "vmovq xmm4, {0}",
+        "vmovq xmm5, {1}",
+        "vmovlhps xmm6, xmm5, xmm4",    // offset in high bits.
+        "vmovdqa [{2}], xmm6",
+        in(reg) offset,
+        in(reg) coeff,
+        in(reg) &OFFSET_COEFF,
+        options(nostack)
+        );
+    }
+}
+
+#[cfg(not(target_arch = "x86_64"))]
+pub fn load_offset_coeff() -> (f64, f64) {
+    return (0 as f64, 0 as f64);
+}
+
+#[cfg(target_arch = "x86_64")]
+pub fn load_offset_coeff() -> (f64, f64) {
+    let offset;
+    let coeff;
+    unsafe {
+        asm!(
+        "vmovdqa xmm3, [{0}]",  // get coeff
+        "vmovhlps xmm4, xmm3, xmm3",    // get offset
+        "vmovq {1}, xmm4",
+        "vmovq {2}, xmm3",
+        in(reg) &OFFSET_COEFF,
+        out(reg) offset,
+        out(reg) coeff,
+        options(readonly, nostack, pure)
+        );
+    }
+    return (offset, coeff);
 }
 
 #[cfg(not(target_arch = "x86_64"))]
