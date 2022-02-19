@@ -6,7 +6,7 @@ Get unix time (nanoseconds) in blazing low latency with high precision. About 5x
 ## Performance
 
 | OS             |CPU           | benchmark         |    rtsc::unix_nano()   |  rtsc::unix_nano_std()    |
-|----------------|--------------------|-------------------|----------------|---------------|-------------|
+|--------------------|-------------------|----------------|---------------|-------------|
 | macOS Monterey |Intel Core i7-7700HQ| bench & bench_std |    7 ns/iter (+/- 1)        |  32 ns/iter (+/- 2) |
 
 ## Usage
