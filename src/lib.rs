@@ -4,22 +4,6 @@ use std::arch::x86_64::_rdtsc;
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-#[cfg(test)]
-mod tests {
-    use std::mem;
-
-    // use crate::{enable_tsc, get_system_clock_source, has_invariant_tsc, UNIX_NANO, unix_nano_tsc};
-    use crate::{
-        is_enabled, is_system_clock_source_tsc, reset, unix_nano_std, unix_nano_tsc, GetUnixNano,
-        OffsetCoeff, OFFSET_COEFF, UNIX_NANO,
-    };
-
-    #[test]
-    fn it_works() {
-        println!("{}", mem::align_of::<OffsetCoeff>());
-        println!("{}", mem::size_of::<OffsetCoeff>());
-    }
-}
 
 type GetUnixNano = fn() -> i64;
 
