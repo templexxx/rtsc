@@ -4,48 +4,41 @@ use std::arch::x86_64::_rdtsc;
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-
 type GetUnixNano = fn() -> i64;
 
 static mut UNIX_NANO: GetUnixNano = unix_nano_std;
 static mut TSC_ENABLED: bool = false;
 
 pub fn unix_nano() -> i64 {
-    unsafe {
-        return UNIX_NANO();
-    }
+    unsafe { UNIX_NANO() }
 }
 
 const NANOS_PER_SEC: i64 = 1_000_000_000;
 
 pub fn unix_nano_std() -> i64 {
     let dur = SystemTime::now().duration_since(UNIX_EPOCH).unwrap();
-    return dur.as_secs() as i64 * NANOS_PER_SEC + dur.subsec_nanos() as i64;
+    dur.as_secs() as i64 * NANOS_PER_SEC + dur.subsec_nanos() as i64
 }
 
 /// `init` init UNIX_NANO implementation. Invoke it before using this lib.
 /// Not thread-safe.
 pub fn init() {
     unsafe {
-        if !TSC_ENABLED {
-            if enable_tsc() {
-                UNIX_NANO = unix_nano_tsc;
-                do_calibrate();
-                TSC_ENABLED = true;
-            }
+        if !TSC_ENABLED && enable_tsc() {
+            UNIX_NANO = unix_nano_tsc;
+            do_calibrate();
+            TSC_ENABLED = true;
         }
     }
 }
 
 pub fn is_enabled() -> bool {
-    unsafe {
-        return TSC_ENABLED;
-    }
+    unsafe { TSC_ENABLED }
 }
 
 #[repr(align(128))]
 union OffsetCoeff {
-    arr: [i8; 128],
+    _oc: [i8; 128],
 } // 128bytes for X86 false sharing range.
 
 /// unix_nano_timestamp = tsc_register_value * Coeff(coefficient) + Offset(offset to system clock).
@@ -53,7 +46,7 @@ union OffsetCoeff {
 /// We could regard coeff as the inverse of TSCFrequency(GHz) (actually it just has mathematics property)
 /// for avoiding future dividing.
 /// MUL gets much better performance than DIV.
-static mut OFFSET_COEFF: OffsetCoeff = OffsetCoeff { arr: [1; 128] };
+static mut OFFSET_COEFF: OffsetCoeff = OffsetCoeff { _oc: [1; 128] };
 
 #[cfg(not(target_arch = "x86_64"))]
 pub fn calibrate() {
@@ -69,7 +62,7 @@ const SAMPLE_DURATION: Duration = Duration::from_millis(16);
 // we have to use a big loop(e.g. 256) to get the "real" clock.
 // And it won't take a long time to finish calibrating job, only about 20µs.
 // [tscClock, wc, tscClock, wc, ..., tscClock]
-const GET_CLOSEST_TSCSYS_RETRIES: usize = 256;
+const GET_CLOSEST_TSC_SYS_RETRIES: usize = 256;
 
 pub const DEFAULT_CALIBRATE_INTERVAL: Duration = Duration::from_secs(300);
 
@@ -95,9 +88,9 @@ fn do_calibrate() {
 
     let mut i = 0;
     while i < cnt {
-        let (tsc0, sys0) = get_closest_tsc_sys(GET_CLOSEST_TSCSYS_RETRIES);
+        let (tsc0, sys0) = get_closest_tsc_sys(GET_CLOSEST_TSC_SYS_RETRIES);
         thread::sleep(SAMPLE_DURATION);
-        let (tsc1, sys1) = get_closest_tsc_sys(GET_CLOSEST_TSCSYS_RETRIES);
+        let (tsc1, sys1) = get_closest_tsc_sys(GET_CLOSEST_TSC_SYS_RETRIES);
 
         tscs.push(tsc0 as f64);
         tscs.push(tsc1 as f64);
@@ -113,7 +106,7 @@ fn do_calibrate() {
 }
 
 fn is_even(n: usize) -> bool {
-    return n & 1 == 0;
+    n & 1 == 0
 }
 
 /// `get_closest_tsc_sys` tries to get the closest tsc register value nearby the system clock in a loop.
@@ -172,7 +165,7 @@ fn get_closest_tsc_sys(retries: usize) -> (i64, i64) {
     let tsc_clock = (timeline[min_index + 1] + timeline[min_index - 1]) >> 1;
     let sys = timeline[min_index];
 
-    return (tsc_clock, sys);
+    (tsc_clock, sys)
 }
 
 /// `simple_linear_regression` uses simple linear regression to calculate tsc register 1/frequency(coefficient) & offset.
@@ -183,11 +176,11 @@ fn simple_linear_regression(tscs: Vec<f64>, syss: Vec<f64>) -> (f64, f64) {
     for i in &tscs {
         t_mean += i;
     }
-    t_mean = t_mean / tscs.len() as f64;
+    t_mean /= tscs.len() as f64;
     for i in &syss {
         s_mean += i;
     }
-    s_mean = s_mean / syss.len() as f64;
+    s_mean /= syss.len() as f64;
 
     let mut denominator: f64 = 0.0;
     let mut numerator: f64 = 0.0;
@@ -199,7 +192,7 @@ fn simple_linear_regression(tscs: Vec<f64>, syss: Vec<f64>) -> (f64, f64) {
     let coeff = numerator / denominator;
     let offset = s_mean - (coeff * t_mean);
 
-    return (coeff, offset);
+    (coeff, offset)
 }
 
 #[cfg(not(target_arch = "x86_64"))]
@@ -225,7 +218,7 @@ pub fn unix_nano_tsc() -> i64 {
         options(nostack)
         );
     }
-    return ret;
+    ret
 }
 
 #[cfg(not(target_arch = "x86_64"))]
@@ -268,21 +261,20 @@ pub fn load_offset_coeff() -> (f64, f64) {
         options(readonly, nostack, pure)
         );
     }
-    return (offset, coeff);
+    (offset, coeff)
 }
 
 #[cfg(target_arch = "x86_64")]
 fn enable_tsc() -> bool {
-    return if !has_invariant_tsc() && !is_system_clock_source_tsc() {
-        false
-    } else {
-        is_x86_feature_detected!("avx") && is_x86_feature_detected!("fma")
-    };
+    if !has_invariant_tsc() && !is_system_clock_source_tsc() {
+        return false;
+    }
+    is_x86_feature_detected!("avx") && is_x86_feature_detected!("fma")
 }
 
 #[cfg(not(target_os = "linux"))]
 fn is_system_clock_source_tsc() -> bool {
-    return false;
+    false
 }
 
 const CLOCK_SRC_PATH: &str = "/sys/devices/system/clocksource/clocksource0/current_clocksource";
@@ -296,14 +288,12 @@ fn is_system_clock_source_tsc() -> bool {
         Err(_) => String::new(),
     };
 
-    if !src.is_empty() {
-        if src.ends_with('\n') {
-            let mut s = src;
-            s.pop();
-            return s == "tsc";
-        }
+    if !src.is_empty() && src.ends_with('\n') {
+        let mut s = src;
+        s.pop();
+        return s == "tsc";
     }
-    return false;
+    false
 }
 
 // This function was copied from https://github.com/gnzlbg/tsc/blob/master/src/lib.rs,
@@ -337,5 +327,5 @@ fn has_invariant_tsc() -> bool {
 
     // Test CPUID.80000007H:EDX[8], if the bit is set, the CPU has an
     // invariant TSC
-    return edx & (1 << 8) != 0;
+    edx & (1 << 8) != 0
 }

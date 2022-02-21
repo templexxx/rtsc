@@ -6,8 +6,6 @@ use std::thread;
 use std::time::Duration;
 use test::Bencher;
 
-use rtsc;
-
 #[test]
 fn time_drift() {
     rtsc::init();
@@ -26,8 +24,8 @@ fn time_drift() {
     }
 
     let mut delta: f64 = 0.0;
-    for i in 0..cnt {
-        delta += deltas[i];
+    for d in deltas {
+        delta += d.abs();
     }
 
     assert!(
@@ -40,10 +38,10 @@ fn time_drift() {
 fn bench(b: &mut Bencher) {
     rtsc::init();
 
-    b.iter(|| rtsc::unix_nano());
+    b.iter(rtsc::unix_nano);
 }
 
 #[bench]
 fn bench_std(b: &mut Bencher) {
-    b.iter(|| rtsc::unix_nano_std());
+    b.iter(rtsc::unix_nano_std);
 }
